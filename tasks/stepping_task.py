@@ -267,8 +267,8 @@ class SteppingTask(object):
         ## GENERATE STEP SEQUENCE
         # select a walking 'mode'
         self.mode = np.random.choice(
-            [WalkModes.CURVED, WalkModes.STANDING, WalkModes.BACKWARD, WalkModes.LATERAL, WalkModes.FORWARD],
-            p=[0.15, 0.05, 0.2, 0.3, 0.3])
+            [WalkModes.CURVED, WalkModes.STANDING, WalkModes.FORWARD],
+            p=[0.4, 0.2, 0.4])
 
         d = {'step_size':0.3, 'step_gap':0.15, 'step_height':0, 'num_steps':20, 'curved':False, 'lateral':False}
         # generate sequence according to mode

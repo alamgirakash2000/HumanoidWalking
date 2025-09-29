@@ -1,0 +1,24 @@
+# Core dependencies for HumanoidWalk environment
+numpy>=2.0
+torch
+ray
+transforms3d
+dm_control
+mujoco>=3.2.0
+
+# Additional dependencies from spark environment
+scipy
+numba
+casadi
+matplotlib
+pyyaml
+osqp
+tensorboardX
+
+# MuJoCo test dependencies
+mujoco-mjx
+absl-py
+pytest-xdist
+
+# Optional: For better performance and compatibility
+# pinocchio>=3.2.0  # Install via conda: conda install -c conda-forge pinocchio=3.2.0

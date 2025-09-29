@@ -1,0 +1,47 @@
+sim_dt: 0.001
+control_dt: 0.025
+obs_history_len: 1
+action_smoothing: 0.5
+
+ctrllimited: true
+jointlimited: true
+
+init_noise: 3
+
+pdgains:
+  "left_hip_yaw_joint": [100, 10]
+  "left_hip_roll_joint": [100, 10]
+  "left_hip_pitch_joint": [100, 10]
+  "left_knee_joint": [120, 12]
+  "left_ankle_pitch_joint": [30, 6]
+  "left_ankle_roll_joint": [30, 6]
+  "right_hip_yaw_joint": [100, 10]
+  "right_hip_roll_joint": [100, 10]
+  "right_hip_pitch_joint": [100, 10]
+  "right_knee_joint": [120, 12]
+  "right_ankle_pitch_joint": [30, 6]
+  "right_ankle_roll_joint": [30, 6]
+
+observation_noise:
+  enabled: true
+  multiplier: 1.0
+  type: "uniform" # or "gaussian"
+  scales:
+    root_orient: 0.05
+    root_ang_vel: 0.05
+    motor_pos: 0.02
+    motor_vel: 0.05
+    motor_tau: 5.0
+
+perturbation:
+  enable: true
+  bodies: ["pelvis", "torso_link"]
+  force_magnitude: 10
+  torque_magnitude: 2
+  interval: 5
+
+dynamics_randomization:
+  enable: true
+  interval: 0.5
+
+

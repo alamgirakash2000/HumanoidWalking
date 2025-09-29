@@ -26,7 +26,7 @@ class Task:
 
         # upperbody reward
         head_pose_offset = np.zeros(2)
-        head_pose = self._client.get_object_affine_by_name("head_link", 'OBJ_BODY')
+        head_pose = self._client.get_object_affine_by_name("torso_link", 'OBJ_BODY')
         head_pos_in_robot_base = np.linalg.inv(root_pose).dot(head_pose)[:2, 3] - head_pose_offset
         upperbody_error = np.linalg.norm(head_pos_in_robot_base)
 
@@ -96,11 +96,12 @@ class H1Env(mujoco_env.MujocoEnv):
             export_dir = os.path.dirname(path_to_xml)
             builder(export_dir, config={
                 'unused_joints': [WAIST_JOINTS, ARM_JOINTS],
+                'keep_visuals': True,  # Keep arm/waist visuals even when removing joints
                 'rangefinder': False,
                 'raisedplatform': False,
                 'ctrllimited': self.cfg.ctrllimited,
                 'jointlimited': self.cfg.jointlimited,
-                'minimal': self.cfg.reduced_xml,
+                'minimal': False,  # Don't remove visual meshes
             })
 
         mujoco_env.MujocoEnv.__init__(self, path_to_xml, sim_dt, control_dt)
@@ -112,7 +113,7 @@ class H1Env(mujoco_env.MujocoEnv):
         # list of desired actuators
         self.leg_names = LEG_JOINTS
         gains_dict = self.cfg.pdgains.to_dict()
-        kp, kd = zip(*[gains_dict[jn] for jn in self.leg_names])
+        kp, kd = zip(*[gains_dict[jn + "_joint"] for jn in self.leg_names])
         pdgains = np.array([kp, kd])
 
         # define nominal pose

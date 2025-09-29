@@ -18,14 +18,22 @@ def import_env(env_name_str):
         from envs.jvrc import JvrcWalkEnv as Env
     elif env_name_str=='jvrc_step':
         from envs.jvrc import JvrcStepEnv as Env
+    elif env_name_str=='jvrc_walk_avoidance':
+        from envs.jvrc_walk_avoidance import JvrcWalkAvoidanceEnv as Env
     elif env_name_str=='h1':
         from envs.h1 import H1Env as Env
+    elif env_name_str=='h1_walk':
+        from envs.h1 import H1WalkEnv as Env
+    elif env_name_str=='h1_step':
+        from envs.h1 import H1StepEnv as Env
+    elif env_name_str=='g1_walk':
+        from envs.g1 import G1WalkEnv as Env
     else:
         raise Exception("Check env name!")
     return Env
 
 def run_experiment(args):
-    # import the correct environment
+    # import the correct environment 
     Env = import_env(args.env)
 
     # wrapper function for creating parallelized envs
@@ -45,6 +53,15 @@ def run_experiment(args):
     #os.environ['OMP_NUM_THREADS'] = '1'  # [TODO: Is this needed?]
     if not ray.is_initialized():
         ray.init(num_cpus=args.num_procs)
+
+    # Auto-resume: Check if models already exist in logdir
+    if not args.continued and args.logdir.exists():
+        actor_path = Path(args.logdir, "actor.pt")
+        critic_path = Path(args.logdir, "critic.pt")
+        if actor_path.exists() and critic_path.exists():
+            print(f"Found existing models in {args.logdir}")
+            print(f"Auto-resuming training from: {actor_path}")
+            args.continued = actor_path
 
     # dump hyperparameters
     Path.mkdir(args.logdir, parents=True, exist_ok=True)
@@ -104,9 +121,14 @@ if __name__ == "__main__":
                             help="Path to trained model dir")
         parser.add_argument("--out-dir", required=False, type=Path, default=None,
                             help="Path to directory to save videos")
-        parser.add_argument("--ep-len", required=False, type=int, default=10,
+        parser.add_argument("--ep-len", required=False, type=int, default=30,
                             help="Episode length to play (in seconds)")
+        parser.add_argument("--save-video", required=False, action="store_true",
+                            help="Enable video recording (disabled by default)")
         args = parser.parse_args()
+        
+        # Set record_video flag - DEFAULT IS NO VIDEO
+        args.record_video = args.save_video
 
         path_to_actor = ""
         if args.path.is_file() and args.path.suffix==".pt":

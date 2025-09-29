@@ -15,6 +15,33 @@ Code for the papers:
 [Rohan P. Singh](https://rohanpsingh.github.io), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Rafael Cisneros](https://unit.aist.go.jp/jrl-22022/en/members/member-cisneros.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
 
+# Command to Run by Akash
+```
+
+conda activate humanoidwalk
+
+# Basic standing task
+python run_experiment.py train --logdir trained/h1 --env h1 --num-procs 24
+
+# Basic walking task  
+python run_experiment.py train --logdir trained/jvrc_walk --env jvrc_walk --num-procs 24
+
+
+
+
+
+# Stepping task with footsteps
+python run_experiment.py train --logdir trained/jvrc_step --env jvrc_step --num-procs 24
+
+
+
+# TO TEST:
+python run_experiment.py eval --path trained/jvrc_walk
+
+
+```
+
+
 ## Code structure:
 A rough outline for the repository that might be useful for adding your own robot:
 ```

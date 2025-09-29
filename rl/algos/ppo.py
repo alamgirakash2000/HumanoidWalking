@@ -13,6 +13,7 @@ import sys
 import time
 import numpy as np
 import datetime
+import pickle
 
 import ray
 
@@ -48,10 +49,27 @@ class PPO:
 
         # counter for training iterations
         self.iteration_count = 0
+        self.start_iteration = 0  # Track where we should start training from
 
         # directory logging and saving weights
         self.save_path = Path(args.logdir)
         Path.mkdir(self.save_path, parents=True, exist_ok=True)
+        
+        # Load training metadata if resuming
+        if args.continued:
+            metadata_path = Path(self.save_path, "training_metadata.pkl")
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, 'rb') as f:
+                        metadata = pickle.load(f)
+                    self.start_iteration = metadata['iteration_count'] + 1  # Start from next iteration
+                    self.total_steps = metadata.get('total_steps', 0)
+                    self.highest_reward = metadata.get('highest_reward', -np.inf)
+                    print(f"Loaded training metadata: resuming from iteration {self.start_iteration}")
+                    print(f"Previous total steps: {self.total_steps}, highest reward: {self.highest_reward}")
+                except Exception as e:
+                    print(f"Warning: Could not load training metadata: {e}")
+                    print("Starting iteration count from 0")
 
         # create the summarywriter
         self.writer = SummaryWriter(log_dir=self.save_path, flush_secs=10)
@@ -104,12 +122,24 @@ class PPO:
         self.base_policy = base_policy
 
     @staticmethod
-    def save(nets, save_path, suffix=""):
+    def save(nets, save_path, suffix="", iteration_count=None, total_steps=None, highest_reward=None):
         filetype = ".pt"
         for name, net in nets.items():
             path = Path(save_path, name + suffix + filetype)
             torch.save(net, path)
             print("Saved {} at {}".format(name, path))
+        
+        # Save training metadata when saving the main models (no suffix)
+        if suffix == "" and iteration_count is not None:
+            metadata = {
+                'iteration_count': iteration_count,
+                'total_steps': total_steps,
+                'highest_reward': highest_reward
+            }
+            metadata_path = Path(save_path, "training_metadata.pkl")
+            with open(metadata_path, 'wb') as f:
+                pickle.dump(metadata, f)
+            print("Saved training metadata at {}".format(metadata_path))
         return
 
     @ray.remote
@@ -156,7 +186,13 @@ class PPO:
             value = critic(state)
             memory.finish_path(last_val=(not done) * value)
 
-        return memory.get_data()
+        # Return numpy arrays to avoid Ray/Torch pickling of storages, which
+        # can intermittently fail with TypeError: 'int' object is not callable
+        data = memory.get_data()
+        for k, v in list(data.items()):
+            if torch.is_tensor(v):
+                data[k] = v.numpy()
+        return data
 
     def sample_parallel(self, *args, deterministic=False):
 
@@ -169,11 +205,17 @@ class PPO:
         workers = [worker.remote(*args) for _ in range(self.n_proc)]
         result = ray.get(workers)
 
-        # Aggregate results
+        # Aggregate results (convert numpy -> torch tensors)
         keys = result[0].keys()
-        aggregated_data = {
-            k: torch.cat([r[k] for r in result]) for k in keys
-        }
+        aggregated_data = {}
+        for k in keys:
+            vals = [r[k] for r in result]
+            if isinstance(vals[0], torch.Tensor):
+                aggregated_data[k] = torch.cat(vals)
+            else:
+                import numpy as _np
+                concatenated = _np.concatenate(vals)
+                aggregated_data[k] = torch.from_numpy(concatenated)
 
         class Data:
             def __init__(self, data):
@@ -281,7 +323,7 @@ class PPO:
         avg_eval_ep_rewards = np.mean(eval_ep_rewards)
         if self.highest_reward < avg_eval_ep_rewards:
             self.highest_reward = avg_eval_ep_rewards
-            self.save(nets, self.save_path)
+            self.save(nets, self.save_path, "", self.iteration_count, self.total_steps, self.highest_reward)
 
         return eval_batches
 
@@ -299,7 +341,7 @@ class PPO:
         if hasattr(env_fn(), 'mirror_action'):
             act_mirr = env_fn().mirror_action
 
-        for itr in range(n_itr):
+        for itr in range(self.start_iteration, self.start_iteration + n_itr):
             print("********** Iteration {} ************".format(itr))
 
             self.policy.train()
@@ -398,13 +440,15 @@ class PPO:
             sys.stdout.flush()
 
             elapsed = time.time() - train_start_time
-            iter_avg = elapsed/(itr+1)
-            ETA = round((n_itr - itr)*iter_avg)
+            iterations_completed = itr - self.start_iteration + 1
+            iter_avg = elapsed/iterations_completed
+            remaining_iterations = self.start_iteration + n_itr - itr - 1
+            ETA = round(remaining_iterations * iter_avg)
             print("Total time elapsed: {:.2f}s. Total steps: {} (fps={:.2f}. iter-avg={:.2f}s. ETA={})".format(
                 elapsed, self.total_steps, self.total_steps/elapsed, iter_avg, datetime.timedelta(seconds=ETA)))
 
             # To save time, perform evaluation only after 100 iters
-            if itr==0 or (itr+1)%self.eval_freq==0:
+            if itr == self.start_iteration or (itr+1)%self.eval_freq==0:
                 nets = {"actor": self.policy, "critic": self.critic}
 
                 evaluate_start = time.time()
