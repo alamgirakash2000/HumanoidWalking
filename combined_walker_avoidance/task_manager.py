@@ -59,6 +59,14 @@ class MovingTaskObject3D:
             current_bounds = self.bound.copy()
             for dim in range(3):
                 current_bounds[dim, :] += robot_pos[dim]
+            # Shift obstacle by the robot's XY displacement to stay attached to robot
+            if self.step_counter == 0:
+                self.robot_last_position = robot_pos.copy()
+            delta_robot = robot_pos - self.robot_last_position
+            # Preserve height (Z) exactly as-is; only follow in XY
+            delta_robot[2] = 0.0
+            self.frame[:3, 3] = self.frame[:3, 3] + delta_robot
+            self.robot_last_position = robot_pos.copy()
         else:
             current_bounds = self.bound
             

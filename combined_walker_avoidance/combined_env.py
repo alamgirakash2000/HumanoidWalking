@@ -598,8 +598,9 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         # Update walking system (it needs all 29 actions now)
         walking_rewards, walking_done = self.walking_robot.step(combined_targets, combined_offsets)
         
-        # Update task manager (obstacles, goals)
-        self.task_manager.step(upper_body_feedback)
+        # Update task manager (obstacles, goals) using the LATEST robot base after stepping
+        updated_upper_body_feedback = self.get_upper_body_observation()
+        self.task_manager.step(updated_upper_body_feedback)
         
         # Get observations for next step
         walking_obs_new = self.get_walking_observation()
@@ -611,10 +612,12 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         total_reward = sum(walking_rewards.values())
         done = walking_done or task_info.get("done", False)
         
-        # Create combined info
+        # Create combined info (use post-step task info for accurate visualization/state)
+        task_info_post = self.task_manager.get_info(updated_upper_body_feedback)
+        done = walking_done or task_info_post.get("done", False)
         info = {
             "walking_rewards": walking_rewards,
-            "task_info": task_info,
+            "task_info": task_info_post,
             "safety_info": combined_info,
             "done": done
         }
