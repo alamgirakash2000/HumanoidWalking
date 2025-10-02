@@ -1,6 +1,69 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv
+venv
+ENV
+env
+
+# Logs and temporary files
+**/logs/
+**/log/
+*.log
+events.out.tfevents.*
+
+# Trained models - ignore all except g1_walk
+trained/*
+!trained/g1_walk
+!trained/g1_walk/**
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor directories and files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Other common ignores
+*.bak
+*.gho
+*.ori
+*.orig
+*.tmp
+*.rej
 *~
-__pycache__*
+*.o
 *.pyc
-*.egg-info
-*.#~
-logs*
+*.pyo
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar

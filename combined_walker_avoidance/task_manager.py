@@ -195,12 +195,12 @@ class CombinedBenchmarkTask:
         self.goal_left.frame[:3, 3] = np.array([
             np.random.uniform(0.1, 0.4),
             np.random.uniform(0.1, 0.4), 
-            np.random.uniform(0.0, 0.2)  # Original height range - relative to robot base!
+            np.random.uniform(0.8, 1.0)  # Higher height for reachability
         ])
         self.goal_right.frame[:3, 3] = np.array([
             np.random.uniform(0.1, 0.4),
             np.random.uniform(-0.4, -0.1), 
-            np.random.uniform(0.0, 0.2)  # Original height range - relative to robot base!
+            np.random.uniform(0.8, 1.0)  # Higher height for reachability
         ])
         
         # Info structure
@@ -250,8 +250,18 @@ class CombinedBenchmarkTask:
         goal_left_local = base_to_robot @ goal_left_global
         goal_right_local = base_to_robot @ goal_right_global
         
-        self.info["goal_teleop"]["left"] = goal_left_local
-        self.info["goal_teleop"]["right"] = goal_right_local
+        # Use STATIC goals like the original system (not moving goals!)
+        # The original system has fixed relative positions for goals
+        self.goal_teleop_static = {}
+        self.goal_teleop_static["left"] = np.array(
+            [[1.0, 0.0, 0.0, 0.25], [0.0, 1.0, 0.0, 0.25], [0.0, 0.0, 1.0, 0.1], [0.0, 0.0, 0.0, 1.0]]
+        )
+        self.goal_teleop_static["right"] = np.array(
+            [[1.0, 0.0, 0.0, 0.25], [0.0, 1.0, 0.0, -0.25], [0.0, 0.0, 1.0, 0.1], [0.0, 0.0, 0.0, 1.0]]
+        )
+
+        self.info["goal_teleop"]["left"] = self.goal_teleop_static["left"]
+        self.info["goal_teleop"]["right"] = self.goal_teleop_static["right"]
         
         # Obstacle information (in global frame)
         obstacle_frames = []

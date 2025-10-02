@@ -37,6 +37,7 @@ from simplified.g1_benchmark_pid.robot_impl import G1BasicKinematics
 # Import our combined configuration
 from .robot_config import G1CombinedConfig, create_combined_g1_model
 from .task_manager import CombinedBenchmarkTask
+from simplified.g1_benchmark_pid.utils import VizColor
 
 
 class G1CombinedEnv(mujoco_env.MujocoEnv):
@@ -80,6 +81,8 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         # Create viewer like original simplified system (this is crucial!)
         self.enable_viewer = enable_viewer
         self.viewer = None  # Will be set by runner when needed
+        # Store safety info for visualization
+        self._last_safety_info = None
         
         # Setup walking system components
         self._setup_walking_system()
@@ -95,6 +98,9 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
 
         # Initialize action and observation spaces
         self._setup_spaces()
+        
+        # Integrated upper-body position target (convert vel commands to pos)
+        self._upper_body_pos_target = np.zeros(17)
         
         print("✅ Combined G1 environment initialized successfully!")
         print(f"   - Walking joints: {len(self.combined_config.leg_joints)}")
@@ -201,10 +207,11 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
             angle = np.arccos(np.clip(np.dot(z_axis, direction), -1.0, 1.0))
             quat = np.zeros(4)
             mujoco.mju_axisAngle2Quat(quat, axis, angle)
-            rot_matrix = np.zeros((3, 3))
-            mujoco.mju_quat2Mat(rot_matrix.flatten(), quat)
+            # mjv_initGeom expects a 3x3 matrix flattened; use contiguous array
+            rot_matrix = np.zeros((3, 3)).flatten()
+            mujoco.mju_quat2Mat(rot_matrix, quat)
         else:
-            rot_matrix = np.eye(3)
+            rot_matrix = np.eye(3).flatten()
             
         # Add to renderer scene
         if hasattr(self, 'renderer') and self.renderer._scene.ngeom < self.renderer._scene.maxgeom:
@@ -213,7 +220,7 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
                 type=mujoco.mjtGeom.mjGEOM_CAPSULE,
                 size=[radius, length / 2, 0.0],
                 pos=midpoint.flatten(),
-                mat=rot_matrix.flatten(),
+                mat=rot_matrix,
                 rgba=color,
             )
             self.renderer._scene.ngeom += 1
@@ -225,7 +232,7 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
                 type=mujoco.mjtGeom.mjGEOM_CAPSULE,
                 size=[radius, length / 2, 0.0],
                 pos=midpoint.flatten(),
-                mat=rot_matrix.flatten(),
+                mat=rot_matrix,
                 rgba=color,
             )
             self.viewer.user_scn.ngeom += 1
@@ -443,10 +450,13 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         upper_body_joint_vel = all_joint_vel[12:]  # 17 joints
         
         # The upper body system expects 20 DOF: 17 joints + 3 base movement
-        # Add the 3 base movement DOF (these will be controlled by walking policy)
-        base_linear_x = 0.0  # Will be handled by walking
-        base_linear_y = 0.0  # Will be handled by walking  
-        base_rot_yaw = 0.0   # Will be handled by walking
+        # Provide actual base XY and yaw from the walking robot so safety aligns with world
+        base_pos = self.data.body('pelvis').xpos.copy()
+        base_quat = self.data.body('pelvis').xquat.copy()  # [w, x, y, z]
+        base_r, base_p, base_yaw = tf3.euler.quat2euler(base_quat)
+        base_linear_x = float(base_pos[0])
+        base_linear_y = float(base_pos[1])  
+        base_rot_yaw = float(base_yaw)
         
         upper_body_pos = np.concatenate([
             upper_body_joint_pos, 
@@ -459,8 +469,6 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         ])  # 20 DOF total
         
         # Robot base frame (for obstacle avoidance calculations)
-        base_pos = self.data.body('pelvis').xpos.copy()
-        base_quat = self.data.body('pelvis').xquat.copy()  # [w, x, y, z]
         base_rot_mat = tf3.quaternions.quat2mat(base_quat)
         
         robot_base_frame = np.eye(4)
@@ -535,6 +543,9 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
                 upper_body_feedback, task_info, action_info
             )
         
+        # Keep latest safety info for rendering
+        self._last_safety_info = combined_info
+
         # Combine actions: legs (walking) + upper body (obstacle avoidance)
         self.combined_action[:12] = walking_action  # Leg joints  
         
@@ -547,16 +558,24 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         self._debug_step_count += 1
         
         if len(u_safe_array) >= 17:
-            upper_body_commands = u_safe_array[:17]  # Take first 17 elements
+            upper_body_vel_cmd = u_safe_array[:17]
         else:
             # Pad with zeros if somehow less than 17 (shouldn't happen)
-            upper_body_commands = np.pad(u_safe_array, (0, 17 - len(u_safe_array)), 'constant')
+            upper_body_vel_cmd = np.pad(u_safe_array, (0, 17 - len(u_safe_array)), 'constant')
             print(f"WARNING: u_safe had {len(u_safe_array)} elements, padded to 17")
         
+        # Integrate velocity commands to position targets (match simplified behavior)
+        if not hasattr(self, '_upper_body_pos_target') or self._upper_body_pos_target.shape[0] != 17:
+            self._upper_body_pos_target = np.zeros(17)
+        self._upper_body_pos_target = (
+            self._upper_body_pos_target + upper_body_vel_cmd.astype(np.float64) * float(self.cfg.control_dt)
+        )
+        upper_body_pos_target = self._upper_body_pos_target
+        
         # Ensure exactly 17 elements before assignment
-        upper_body_commands = upper_body_commands.astype(np.float64)  # Ensure proper dtype
-        assert len(upper_body_commands) == 17, f"Expected 17 upper body commands, got {len(upper_body_commands)}"
-        self.combined_action[12:29] = upper_body_commands
+        upper_body_pos_target = upper_body_pos_target.astype(np.float64)  # Ensure proper dtype
+        assert len(upper_body_pos_target) == 17, f"Expected 17 upper body targets, got {len(upper_body_pos_target)}"
+        self.combined_action[12:29] = upper_body_pos_target
         
         # Apply walking system action processing (for legs only)
         leg_targets = self.cfg.action_smoothing * walking_action + \
@@ -566,7 +585,7 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         combined_targets = np.zeros(29)
         combined_targets[:12] = leg_targets  # Leg targets
         # ROBUST FIX: Always ensure exactly 17 upper body targets
-        combined_targets[12:29] = upper_body_commands  # Use the same processed commands
+        combined_targets[12:29] = upper_body_pos_target  # Use integrated position targets
         
         # Create combined offsets: legs + upper body  
         leg_offsets = [
@@ -575,9 +594,6 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         ]
         upper_body_offsets = [0.0] * 17  # No offsets for upper body
         combined_offsets = np.array(leg_offsets + upper_body_offsets)
-        
-        # Apply combined actions to simulation  
-        self._apply_combined_actions(leg_targets, leg_offsets, upper_body_commands)
         
         # Update walking system (it needs all 29 actions now)
         walking_rewards, walking_done = self.walking_robot.step(combined_targets, combined_offsets)
@@ -681,7 +697,9 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         
         # Calculate robot collision frame positions for visualization
         robot_base_frame = upper_body_feedback["robot_base_frame"]
-        dof_pos = upper_body_feedback["state"][:17]  # Only joint positions
+        # Use full 20 DoF state to compute kinematics like simplified system
+        full_state = upper_body_feedback["state"]
+        dof_pos = self.upper_body_kinematics.robot_cfg.decompose_state_to_dof(full_state)
         frames = self.upper_body_kinematics.forward_kinematics(dof_pos)
         
         # Transform to world coordinates
@@ -708,22 +726,90 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         self.render_sphere(goal_left_world, 0.05, goal_color)
         self.render_sphere(goal_right_world, 0.05, goal_color)
         
-        # Render collision volumes around robot (DARK GRAY SPHERES - like original)
+        # Render collision volumes around robot with safety coloring (like original)
+        env_collision_mask = getattr(self.safety_controller.safety_index, 'env_collision_mask', None)
+        self_collision_mask = getattr(self.safety_controller.safety_index, 'self_collision_mask', None)
+
+        def viz_critical_env_pairs(mat, thres, mask, line_width, line_color):
+            if mat is None or mask is None or mask.size == 0:
+                return []
+            masked_mat = mat[mask]
+            masked_indices = np.argwhere(mask)
+            indices_of_interest = masked_indices[np.argwhere(masked_mat >= thres).reshape(-1)]
+            for i, j in indices_of_interest:
+                self.render_line_segment(
+                    pos1=robot_frames_world[i][:3, 3],
+                    pos2=task_info["obstacle"]["frames_world"][j][:3, 3],
+                    radius=line_width,
+                    color=line_color,
+                )
+            return indices_of_interest
+
+        def viz_critical_self_pairs(mat, thres, mask, line_width, line_color):
+            if mat is None or mask is None or mask.size == 0:
+                return []
+            masked_mat = mat[mask]
+            masked_indices = np.argwhere(mask)
+            indices_of_interest = masked_indices[np.argwhere(masked_mat >= thres).reshape(-1)]
+            for i, j in indices_of_interest:
+                self.render_line_segment(
+                    pos1=robot_frames_world[i][:3, 3],
+                    pos2=robot_frames_world[j][:3, 3],
+                    radius=line_width,
+                    color=line_color,
+                )
+            return indices_of_interest
+
+        action_info = self._last_safety_info or {}
+        phi_hold_mat_env = action_info.get("phi_hold_mat_env", None)
+        active_pairs_hold_env = viz_critical_env_pairs(
+            phi_hold_mat_env, 0.0, env_collision_mask, 0.002, VizColor.hold
+        )
+        phi_hold_mat_self = action_info.get("phi_hold_mat_self", None)
+        active_pairs_hold_self = viz_critical_self_pairs(
+            phi_hold_mat_self, 0.0, self_collision_mask, 0.002, VizColor.hold
+        )
+        phi_safe_mat_env = action_info.get("phi_safe_mat_env", None)
+        active_pairs_unsafe_env = viz_critical_env_pairs(
+            phi_safe_mat_env, 0.0, env_collision_mask, 0.02, VizColor.unsafe
+        )
+        phi_safe_mat_self = action_info.get("phi_safe_mat_self", None)
+        active_pairs_unsafe_self = viz_critical_self_pairs(
+            phi_safe_mat_self, 0.0, self_collision_mask, 0.02, VizColor.unsafe
+        )
+
+        # Now draw the robot collision volumes with appropriate colors
         for frame_id, frame_world in enumerate(robot_frames_world):
-            if frame_id < len(self.combined_config.upper_body_config.CollisionVol):
-                try:
-                    frame_enum = list(self.combined_config.upper_body_config.Frames)[frame_id]
-                    geom = self.combined_config.upper_body_config.CollisionVol[frame_enum]
-                    if geom.type == "sphere":
-                        pos = frame_world[:3, 3]
-                        radius = geom.attributes["radius"]
-                        # Use original collision volume color: dark gray [0.1, 0.1, 0.1, 0.7]
-                        self.render_sphere(pos, radius, geom.color)
-                except:
-                    continue
+            try:
+                geom = self.combined_config.upper_body_config.CollisionVol[
+                    self.combined_config.upper_body_config.Frames(frame_id)
+                ]
+            except Exception:
+                continue
+
+            if any(frame_id in pair for pair in active_pairs_unsafe_self) or any(
+                frame_id == _frame_id for _frame_id, _ in active_pairs_unsafe_env
+            ):
+                color = VizColor.unsafe
+            elif any(frame_id in pair for pair in active_pairs_hold_self) or any(
+                frame_id == _frame_id for _frame_id, _ in active_pairs_hold_env
+            ):
+                color = VizColor.hold
+            else:
+                if (
+                    hasattr(self.safety_controller.safety_index, 'env_collision_vol_ignore') and
+                    frame_id in self.safety_controller.safety_index.env_collision_vol_ignore
+                ):
+                    color = VizColor.collision_volume_ignored
+                else:
+                    color = VizColor.collision_volume
+
+            if geom.type == "sphere":
+                pos = frame_world[:3, 3]
+                radius = geom.attributes["radius"]
+                self.render_sphere(pos, radius, color)
         
-        # Show collision constraint lines (like original simplified system)
-        self._render_collision_constraints(robot_frames_world, task_info)
+        # Collision lines rendered above via viz_critical_* helpers
         
         # Update scene and sync viewer (optimized)
         if hasattr(self, 'renderer'):
