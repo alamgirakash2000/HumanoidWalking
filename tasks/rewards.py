@@ -102,19 +102,32 @@ def _calc_foot_vel_clock_reward(self, left_vel_fn, right_vel_fn):
 
 def _calc_foot_pos_clock_reward(self):
     # constraints of foot height based on clock
-    desired_max_foot_height = 0.05
-    l_foot_pos = self._client.get_object_xpos_by_name('lf_force', 'OBJ_SITE')[2]
-    r_foot_pos = self._client.get_object_xpos_by_name('rf_force', 'OBJ_SITE')[2]
-    normed_left_pos = min(np.linalg.norm(l_foot_pos), desired_max_foot_height) / desired_max_foot_height
-    normed_right_pos = min(np.linalg.norm(r_foot_pos), desired_max_foot_height) / desired_max_foot_height
+    # Encourage foot clearance during swing phase
+    desired_swing_height = 0.10  # 10 cm clearance during swing
+    
+    # Get ground reference (minimum of current foot positions)
+    l_foot_z = self._client.get_object_xpos_by_name('lf_force', 'OBJ_SITE')[2]
+    r_foot_z = self._client.get_object_xpos_by_name('rf_force', 'OBJ_SITE')[2]
+    ground_level = min(l_foot_z, r_foot_z)
+    
+    # Calculate relative foot heights
+    l_foot_height = l_foot_z - ground_level
+    r_foot_height = r_foot_z - ground_level
+    
+    # Normalize heights
+    normed_left_height = min(l_foot_height, desired_swing_height) / desired_swing_height
+    normed_right_height = min(r_foot_height, desired_swing_height) / desired_swing_height
+    normed_left_height = normed_left_height * 2 - 1  # map [0,1] to [-1,1]
+    normed_right_height = normed_right_height * 2 - 1
 
-    left_pos_clock = self.left_clock[1](self._phase)
-    right_pos_clock = self.right_clock[1](self._phase)
+    left_vel_clock = self.left_clock[1](self._phase)  # positive during left swing
+    right_vel_clock = self.right_clock[1](self._phase)  # positive during right swing
 
-    left_pos_score = np.tan(np.pi/4 * left_pos_clock * normed_left_pos)
-    right_pos_score = np.tan(np.pi/4 * right_pos_clock * normed_right_pos)
+    # Reward foot height during swing (when vel_clock is positive)
+    left_clearance_score = np.tan(np.pi/4 * left_vel_clock * normed_left_height)
+    right_clearance_score = np.tan(np.pi/4 * right_vel_clock * normed_right_height)
 
-    foot_pos_score = left_pos_score + right_pos_score
+    foot_pos_score = (left_clearance_score + right_clearance_score) / 2
     return foot_pos_score
 
 def _calc_body_orient_reward(self, body_name, quat_ref=[1, 0, 0, 0]):

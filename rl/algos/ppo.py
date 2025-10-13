@@ -168,17 +168,30 @@ class PPO:
                 critic.init_hidden_state()
 
             while not done and traj_len < max_traj_len:
-                action = policy(state, deterministic=deterministic)
-                value = critic(state)
+                try:
+                    action = policy(state, deterministic=deterministic)
+                    value = critic(state)
 
-                next_state, reward, done, _ = env.step(action.numpy().copy())
+                    next_state, reward, done, _ = env.step(action.numpy().copy())
 
-                reward = torch.tensor(reward, dtype=torch.float)
-                memory.store(state, action, reward, value, done)
-                memory_full = (len(memory) >= max_steps)
+                    # Check for NaN/Inf values
+                    if (not np.isfinite(next_state).all() or
+                            not np.isfinite(reward)):
+                        print("Warning: NaN/Inf in worker. Resetting.")
+                        done = True
+                        break
 
-                state = torch.tensor(next_state, dtype=torch.float)
-                traj_len += 1
+                    reward = torch.tensor(reward, dtype=torch.float)
+                    memory.store(state, action, reward, value, done)
+                    memory_full = (len(memory) >= max_steps)
+
+                    state = torch.tensor(next_state, dtype=torch.float)
+                    traj_len += 1
+
+                except Exception as e:
+                    print(f"Warning: Worker exception: {e}. Resetting.")
+                    done = True
+                    break
 
                 #if memory_full:
                 #   break
@@ -202,8 +215,20 @@ class PPO:
 
         # Create pool of workers, each getting data for min_steps
         worker = self.sample
-        workers = [worker.remote(*args) for _ in range(self.n_proc)]
-        result = ray.get(workers)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                workers = [worker.remote(*args) for _ in range(self.n_proc)]
+                result = ray.get(workers)
+                break
+            except Exception as e:
+                print(
+                    f"Ray worker error "
+                    f"(attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                if attempt == max_retries - 1:
+                    raise
+                print("Retrying with new workers...")
 
         # Aggregate results (convert numpy -> torch tensors)
         keys = result[0].keys()
@@ -254,7 +279,15 @@ class PPO:
         deterministic_actions = self.policy(obs_batch)
         if mirror_observation is not None and mirror_action is not None:
             if self.recurrent:
-                mir_obs = torch.stack([mirror_observation(obs_batch[i,:,:]) for i in range(obs_batch.shape[0])])
+                # Fix: Apply mirror to each timestep in the sequence and cat (instead of stack) to match shape
+                mir_obs_list = []
+                for i in range(obs_batch.shape[0]):  # batch dim
+                    seq_mir = []
+                    for t in range(obs_batch.shape[1]):  # sequence dim
+                        seq_mir.append(mirror_observation(obs_batch[i, t, :]))
+                    mir_obs_list.append(torch.stack(seq_mir, dim=0))
+                mir_obs = torch.cat(mir_obs_list, dim=0)  # Concat along batch dim
+                
                 mirror_actions = self.policy(mir_obs)
             else:
                 mir_obs = mirror_observation(obs_batch)

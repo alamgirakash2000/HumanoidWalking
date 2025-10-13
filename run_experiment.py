@@ -18,16 +18,10 @@ def import_env(env_name_str):
         from envs.jvrc import JvrcWalkEnv as Env
     elif env_name_str=='jvrc_step':
         from envs.jvrc import JvrcStepEnv as Env
-    elif env_name_str=='jvrc_walk_avoidance':
-        from envs.jvrc_walk_avoidance import JvrcWalkAvoidanceEnv as Env
-    elif env_name_str=='h1':
-        from envs.h1 import H1Env as Env
-    elif env_name_str=='h1_walk':
-        from envs.h1 import H1WalkEnv as Env
-    elif env_name_str=='h1_step':
-        from envs.h1 import H1StepEnv as Env
     elif env_name_str=='g1_walk':
         from envs.g1 import G1WalkEnv as Env
+    elif env_name_str=='g1_step':
+        from envs.g1 import G1StepEnv as Env
     else:
         raise Exception("Check env name!")
     return Env

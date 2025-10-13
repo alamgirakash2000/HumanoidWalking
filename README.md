@@ -1,57 +1,31 @@
 # LearningHumanoidWalking
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=ZgfNzGAkk2Q"><img src="https://github.com/user-attachments/assets/5211cdcd-2267-497b-bd66-ac833703a134" alt="humanoid-walk" style="width:1000px"/></a>
-</p>
-
-Code for the papers:  
-- [**Robust Humanoid Walking on Compliant and Uneven Terrain with Deep Reinforcement Learning**](https://ieeexplore.ieee.org/abstract/document/10769793)  
-[Rohan P. Singh](https://rohanpsingh.github.io), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Zhaoming Xie](https://zhaomingxie.github.io/), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
-
-- [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf)  
-[Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
-
-- [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf)  
-[Rohan P. Singh](https://rohanpsingh.github.io), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Rafael Cisneros](https://unit.aist.go.jp/jrl-22022/en/members/member-cisneros.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
-
 
 # Command to Run by Akash
 ```
 
-conda activate humanoidwalk
+conda activate safeenv
 
-# Basic standing task
-python run_experiment.py train --logdir trained/h1 --env h1 --num-procs 24
 
 # Basic walking task  
-python run_experiment.py train --logdir trained/jvrc_walk --env jvrc_walk --num-procs 24
-
-
-
+python run_experiment.py train --logdir trained/g1_walk --env g1_walk 
 
 
 # Stepping task with footsteps
-python run_experiment.py train --logdir trained/jvrc_step --env jvrc_step --num-procs 24
+python run_experiment.py train --logdir trained/g1_step --env g1_step
 
 
 
 # TO TEST:
-python run_experiment.py eval --path trained/jvrc_walk
+For the g1 walk: `python run_experiment.py eval --path trained/g1_walk`
+For the g1 step: `python run_experiment.py eval --path trained/g1_step`
+For the upper body: `python simplified/runner.py`
+For the combined: `python run_combined.py`
 
+For removing cache: `rm -rf /tmp/mjcf-export/g1 /tmp/mjcf-export/g1_step`
 
-```
+tensorboard --logdir trained/g1_step
 
-
-## Code structure:
-A rough outline for the repository that might be useful for adding your own robot:
-```
-LearningHumanoidWalking/
-├── envs/                <-- Actions and observation space, PD gains, simulation step, control decimation, init, ...
-├── tasks/               <-- Reward function, termination conditions, and more...
-├── rl/                  <-- Code for PPO, actor/critic networks, observation normalization process...
-├── models/              <-- MuJoCo model files: XMLs/meshes/textures
-└── scripts/             <-- Utility scripts, etc.
-```
 
 ## Requirements:
 - Python version: 3.12.4
@@ -71,8 +45,10 @@ Environment names supported:
 | Task Description      | Environment name |
 | ----------- | ----------- |
 | Basic Standing Task   | 'h1' |
-| Basic Walking Task   | 'jvrc_walk' |
-| Stepping Task (using footsteps)  | 'jvrc_step' |
+| Basic Walking Task (JVRC)  | 'jvrc_walk' |
+| Basic Walking Task (G1)  | 'g1_walk' |
+| Stepping Task (using footsteps - JVRC)  | 'jvrc_step' |
+| Stepping Task (using footsteps - G1)  | 'g1_step' |
 
 
 #### **To train:** 
@@ -104,6 +80,18 @@ $ PYTHONPATH=.:$PYTHONPATH python scripts/debug_stepper.py --path <path_to_exp_d
 
 *Walking on curves:*  
 ![curve](https://user-images.githubusercontent.com/16384313/180697266-7b44beb3-38bf-4494-b568-963919dc1106.gif)
+
+
+
+Code for the papers:  
+- [**Robust Humanoid Walking on Compliant and Uneven Terrain with Deep Reinforcement Learning**](https://ieeexplore.ieee.org/abstract/document/10769793)  
+[Rohan P. Singh](https://rohanpsingh.github.io), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Zhaoming Xie](https://zhaomingxie.github.io/), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
+
+- [**Learning Bipedal Walking for Humanoids with Current Feedback**](https://arxiv.org/pdf/2303.03724.pdf)  
+[Rohan P. Singh](https://rohanpsingh.github.io), [Zhaoming Xie](https://zhaomingxie.github.io/), [Pierre Gergondet](https://unit.aist.go.jp/jrl-22022/en/members/member-gergondet.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
+
+- [**Learning Bipedal Walking On Planned Footsteps For Humanoid Robots**](https://arxiv.org/pdf/2207.12644.pdf)  
+[Rohan P. Singh](https://rohanpsingh.github.io), [Mehdi Benallegue](https://unit.aist.go.jp/jrl-22022/en/members/member-benalleguem.html), [Mitsuharu Morisawa](https://unit.aist.go.jp/jrl-22022/en/members/member-morisawa.html), [Rafael Cisneros](https://unit.aist.go.jp/jrl-22022/en/members/member-cisneros.html), [Fumio Kanehiro](https://unit.aist.go.jp/jrl-22022/en/members/member-kanehiro.html)
 
 
 ## Citation
@@ -149,4 +137,3 @@ For walking on footsteps:
 
 ### Credits
 The code in this repository was heavily inspired from [apex](https://github.com/osudrl/apex). Clock-based reward terms and some other ideas were originally proposed by the team from OSU DRL for the Cassie robot, so please also consider citing the works of Jonah Siekmann, Helei Duan, Jeremy Dao, and others.
-

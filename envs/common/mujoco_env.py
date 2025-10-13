@@ -18,9 +18,8 @@ class MujocoEnv():
         if not os.path.exists(fullpath):
             raise IOError("File %s does not exist" % fullpath)
 
-        self.spec = mujoco.MjSpec()
-        self.spec.from_file(fullpath)
-        self.model = self.spec.compile()
+        # Load model directly instead of using MjSpec which has issues
+        self.model = mujoco.MjModel.from_xml_path(fullpath)
         self.data = mujoco.MjData(self.model)
         self.viewer = None
 

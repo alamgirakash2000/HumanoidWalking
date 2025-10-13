@@ -58,17 +58,49 @@ class SymmetricEnv:
     # when the SymmeticEnv is created should not move the clock input order. The indices of the obs vector
     # where the clocks are located need to be inputted.
     def mirror_clock_observation(self, obs):
-        # print("obs.shape = ", obs.shape)
-        # print("obs_mirror_matrix.shape = ", self.obs_mirror_matrix.shape)
+        # Handle different input shapes
+        orig_shape = obs.shape
+        if obs.dim() == 1:  # Single obs [features]
+            obs = obs.unsqueeze(0).unsqueeze(0)  # To [1, 1, features] (batch=1, seq=1)
+            is_recurrent = False
+            history_len = 1
+        elif obs.dim() == 2:  # Non-recurrent [batch, features] or flat history [batch, history*features]
+            obs = obs.unsqueeze(1)  # To [batch, 1, features] for consistency
+            is_recurrent = False
+            history_len = obs.shape[2] // self.base_obs_len  # Assume flat if not seq
+        elif obs.dim() == 3:  # Recurrent [batch, seq_len, features]
+            is_recurrent = True
+            history_len = obs.shape[1]  # seq_len as history
+        else:
+            raise ValueError(f"Unsupported obs shape: {orig_shape}")
+
         mirror_obs_batch = torch.zeros_like(obs)
-        history_len = 1 # FIX HISTORY-OF-STATES LENGTH TO 1 FOR NOW
         for block in range(history_len):
-            obs_ = obs[:, self.base_obs_len*block : self.base_obs_len*(block+1)]
+            if is_recurrent:
+                obs_ = obs[:, block, :]  # [batch, features]
+            else:
+                # For flat 3D (after unsqueeze), slice features
+                start = self.base_obs_len * block
+                end = self.base_obs_len * (block + 1)
+                obs_ = obs[:, 0, start:end]  # [batch, features]
+
             mirror_obs = obs_ @ self.obs_mirror_matrix
             clock = mirror_obs[:, self.clock_inds]
-            for i in range(np.shape(clock)[1]):
-                mirror_obs[:, self.clock_inds[i]] = np.sin(np.arcsin(clock[:, i]) + np.pi)
-            mirror_obs_batch[:, self.base_obs_len*block : self.base_obs_len*(block+1)] = mirror_obs
+            for i in range(clock.shape[1]):
+                mirror_obs[:, self.clock_inds[i]] = torch.sin(
+                    torch.asin(clock[:, i]) + torch.pi
+                )
+            if is_recurrent:
+                mirror_obs_batch[:, block, :] = mirror_obs
+            else:
+                mirror_obs_batch[:, 0, start:end] = mirror_obs
+        
+        # Restore original shape
+        if obs.dim() == 1:
+            mirror_obs_batch = mirror_obs_batch.squeeze(0).squeeze(0)
+        elif orig_shape == 2:
+            mirror_obs_batch = mirror_obs_batch.squeeze(1)  # Back to [batch, features]
+        
         return mirror_obs_batch
 
 

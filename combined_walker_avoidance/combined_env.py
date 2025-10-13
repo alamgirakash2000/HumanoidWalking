@@ -258,10 +258,9 @@ class G1CombinedEnv(mujoco_env.MujocoEnv):
         self.leg_names = self.combined_config.leg_joints
         
         # PD gains for all joints (legs + upper body)
-        gains_dict = self.cfg.pdgains.to_dict()
-        
-        # Get gains for leg joints from config
-        leg_kp, leg_kd = zip(*[gains_dict[jn] for jn in self.leg_names])
+        # With the new simplified config, kp and kd are simple arrays
+        leg_kp = self.cfg.kp
+        leg_kd = self.cfg.kd
         
         # Set reasonable gains for upper body joints (waist + arms)
         # These will be overridden by the upper body controller anyway

@@ -108,17 +108,23 @@ def builder(export_path, config):
     # Remove unused joints so nq matches base(7)+legs(12)=19
     root = _remove_unused_joints(root)
 
-    # Ensure a simple floor plane exists in worldbody
+    # Wrap floor geom in a body (needed for stepping task)
     worldbody = root.find('worldbody')
     if worldbody is None:
         worldbody = ET.SubElement(root, 'worldbody')
-    floor = worldbody.find("geom[@name='floor']")
-    if floor is None:
-        floor = ET.SubElement(worldbody, 'geom', {'name': 'floor'})
-    # Make it an infinite plane with the standard checkerboard material
-    floor.set('type', 'plane')
-    floor.set('size', '0 0 0.05')
-    floor.set('material', 'groundplane')
+    
+    # Remove any existing floor geom
+    for floor_geom in worldbody.findall("geom[@name='floor']"):
+        worldbody.remove(floor_geom)
+    
+    # Create floor body with geom inside it
+    floor_body = ET.SubElement(worldbody, 'body', {'name': 'floor'})
+    floor_geom = ET.SubElement(floor_body, 'geom', {
+        'name': 'floor',
+        'type': 'plane',
+        'size': '0 0 0.25',
+        'material': 'groundplane'
+    })
 
     # Remove keyframes or adjust to match actuator count (avoid ctrl size mismatch)
     keyframes = root.findall('keyframe')
@@ -132,6 +138,22 @@ def builder(export_path, config):
             key = kf.find('key')
             if key is not None:
                 key.set('ctrl', ' '.join(['0']*len(LEG_JOINTS)))
+
+    # Optionally add stepping boxes (stairs/blocks) for stepping task
+    if 'boxes' in config and config['boxes']:
+        for idx in range(20):
+            x = 0.4 * idx
+            body = ET.SubElement(worldbody, 'body', {
+                'name': f"box{str(idx+1).zfill(2)}",
+                'pos': f"{x:.3f} 0 -0.2"
+            })
+            ET.SubElement(body, 'geom', {
+                'name': f"box{str(idx+1).zfill(2)}",
+                'type': 'box',
+                'size': '0.15 0.1 0.1',
+                'rgba': '0.8 0.8 0.8 1',
+                'group': '0'
+            })
 
     # Ensure groundplane texture/material assets exist
     asset = root.find('asset')

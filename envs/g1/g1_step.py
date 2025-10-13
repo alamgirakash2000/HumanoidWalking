@@ -3,17 +3,17 @@ import numpy as np
 import transforms3d as tf3
 import collections
 
+from tasks import stepping_task
 from robots.robot_base import RobotBase
 from envs.common import mujoco_env
 from envs.common import robot_interface
 from envs.common import config_builder
-from tasks.walking_task import WalkingTask
+from .g1_walk_env import G1WalkEnv
 
 from .gen_xml import *
 
-
-class G1WalkEnv(mujoco_env.MujocoEnv):
-    def __init__(self, path_to_yaml = None):
+class G1StepEnv(G1WalkEnv):
+    def __init__(self, path_to_yaml=None):
 
         ## Load CONFIG from yaml ##
         if path_to_yaml is None:
@@ -27,10 +27,11 @@ class G1WalkEnv(mujoco_env.MujocoEnv):
 
         self.history_len = self.cfg.obs_history_len
 
-        path_to_xml = '/tmp/mjcf-export/g1/g1.xml'
+        path_to_xml = '/tmp/mjcf-export/g1_step/g1.xml'
         if not os.path.exists(path_to_xml):
             export_dir = os.path.dirname(path_to_xml)
             builder(export_dir, config={
+                "boxes": True,
             })
 
         mujoco_env.MujocoEnv.__init__(self, path_to_xml, sim_dt, control_dt)
@@ -56,12 +57,13 @@ class G1WalkEnv(mujoco_env.MujocoEnv):
         self.interface = robot_interface.RobotInterface(self.model, self.data, 'right_ankle_roll_link', 'left_ankle_roll_link', None)
 
         # set up task
-        self.task = WalkingTask(client=self.interface,
-                                             dt=control_dt,
-                                             neutral_foot_orient=np.array([1, 0, 0, 0]),
-                                             root_body='pelvis',
-                                             lfoot_body='left_ankle_roll_link',
-                                             rfoot_body='right_ankle_roll_link',
+        self.task = stepping_task.SteppingTask(client=self.interface,
+                                               dt=control_dt,
+                                               neutral_foot_orient=np.array([1, 0, 0, 0]),
+                                               root_body='pelvis',
+                                               lfoot_body='left_ankle_roll_link',
+                                               rfoot_body='right_ankle_roll_link',
+                                               head_body='pelvis',
         )
         # set goal height
         self.task._goal_height_ref = 0.80
@@ -80,7 +82,7 @@ class G1WalkEnv(mujoco_env.MujocoEnv):
                         23, -24, -25, 26, -27, 28, # motor vel [1]
                         17, -18, -19, 20, -21, 22, # motor vel [2]
         ]
-        append_obs = [(len(base_mir_obs)+i) for i in range(3)]
+        append_obs = [(len(base_mir_obs)+i) for i in range(10)]
         self.robot.clock_inds = append_obs[0:2]
         self.robot.mirrored_obs = np.array(base_mir_obs + append_obs, copy=True).tolist()
         self.robot.mirrored_acts = [6, -7, -8, 9, -10, 11,
@@ -93,31 +95,19 @@ class G1WalkEnv(mujoco_env.MujocoEnv):
         self.prev_prediction = np.zeros(action_space_size)
 
         # set observation space
-        self.base_obs_len = 32
+        self.base_obs_len = 39
         self.observation_history = collections.deque(maxlen=self.history_len)
         self.observation_space = np.zeros(self.base_obs_len*self.history_len)
-
-        # manually define observation mean and std
-        self.obs_mean = np.concatenate((
-            np.zeros(5),
-            half_sitting_pose, np.zeros(12),
-            [0.5, 0.5, 0.5]
-        ))
-
-        self.obs_std = np.concatenate((
-            [0.2, 0.2, 1, 1, 1],
-            0.5*np.ones(12), 4*np.ones(12),
-            [1, 1, 1,]
-        ))
-
-        self.obs_mean = np.tile(self.obs_mean, self.history_len)
-        self.obs_std = np.tile(self.obs_std, self.history_len)
 
     def get_obs(self):
         # external state
         clock = [np.sin(2 * np.pi * self.task._phase / self.task._period),
                  np.cos(2 * np.pi * self.task._phase / self.task._period)]
-        ext_state = np.concatenate((clock, [self.task._goal_speed_ref]))
+        ext_state = np.concatenate((clock,
+                                    np.asarray(self.task._goal_steps_x).flatten(),
+                                    np.asarray(self.task._goal_steps_y).flatten(),
+                                    np.asarray(self.task._goal_steps_z).flatten(),
+                                    np.asarray(self.task._goal_steps_theta).flatten()))
 
         # internal state
         qpos = np.copy(self.interface.get_qpos())
