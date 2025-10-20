@@ -1,6 +1,8 @@
 import torch
 import time
 from pathlib import Path
+import numpy as np
+import transforms3d as tf3
 
 import mujoco
 import mujoco.viewer
@@ -34,6 +36,144 @@ class EvaluateEnv:
         else:
             print("✅ Live viewing mode (no video recording)")
             self.writer = None
+
+    def _draw_footstep_markers(self, viewer, task, data):
+        """Draw visual markers for planned footsteps using MuJoCo's geom system."""
+        if not hasattr(task, 'sequence'):
+            return
+        
+        # Use MuJoCo's visualization geoms instead of viewer.add_marker
+        # We'll add temporary visual geoms to the scene
+        
+        arrow_size = 0.5  # arrow length
+        sphere_size = 0.05
+        
+        # Get the scene for visualization
+        try:
+            # Access the viewer's user_scn for markers
+            scn = viewer.user_scn
+            
+            # Clear previous markers
+            scn.ngeom = 0
+            
+            # Draw all planned footsteps in cyan
+            for idx, step in enumerate(task.sequence):
+                step_pos = np.array([step[0], step[1], step[2]])
+                step_theta = step[3]
+                
+                # Skip current targets t1 and t2
+                if idx != task.t1 and idx != task.t2:
+                    # Add sphere
+                    if scn.ngeom < scn.maxgeom:
+                        mujoco.mjv_initGeom(
+                            scn.geoms[scn.ngeom],
+                            mujoco.mjtGeom.mjGEOM_SPHERE,
+                            np.ones(3)*sphere_size,
+                            step_pos,
+                            np.eye(3).flatten(),
+                            np.array([0, 1, 1, 1])  # Cyan
+                        )
+                        scn.ngeom += 1
+                    
+                    # Add arrow
+                    if scn.ngeom < scn.maxgeom:
+                        arrow_rot = tf3.euler.euler2mat(0, np.pi/2, step_theta)
+                        mujoco.mjv_initGeom(
+                            scn.geoms[scn.ngeom],
+                            mujoco.mjtGeom.mjGEOM_ARROW,
+                            np.array([0.02, 0.02, arrow_size]),
+                            step_pos,
+                            arrow_rot.flatten(),
+                            np.array([0, 1, 1, 1])  # Cyan
+                        )
+                        scn.ngeom += 1
+            
+            # Draw current target (t1) in red
+            target_radius = task.target_radius
+            step_pos = np.array(task.sequence[task.t1][0:3])
+            step_theta = task.sequence[task.t1][3]
+            
+            # Target sphere
+            if scn.ngeom < scn.maxgeom:
+                mujoco.mjv_initGeom(
+                    scn.geoms[scn.ngeom],
+                    mujoco.mjtGeom.mjGEOM_SPHERE,
+                    np.ones(3)*sphere_size,
+                    step_pos,
+                    np.eye(3).flatten(),
+                    np.array([1, 0, 0, 1])  # Red
+                )
+                scn.ngeom += 1
+            
+            # Target arrow
+            if scn.ngeom < scn.maxgeom:
+                arrow_rot = tf3.euler.euler2mat(0, np.pi/2, step_theta)
+                mujoco.mjv_initGeom(
+                    scn.geoms[scn.ngeom],
+                    mujoco.mjtGeom.mjGEOM_ARROW,
+                    np.array([0.02, 0.02, arrow_size]),
+                    step_pos,
+                    arrow_rot.flatten(),
+                    np.array([1, 0, 0, 1])  # Red
+                )
+                scn.ngeom += 1
+            
+            # Acceptance radius sphere (transparent)
+            if scn.ngeom < scn.maxgeom:
+                mujoco.mjv_initGeom(
+                    scn.geoms[scn.ngeom],
+                    mujoco.mjtGeom.mjGEOM_SPHERE,
+                    np.ones(3)*target_radius,
+                    step_pos,
+                    np.eye(3).flatten(),
+                    np.array([1, 0, 0, 0.1])  # Transparent red
+                )
+                scn.ngeom += 1
+            
+            # Draw next target (t2) in blue
+            step_pos = np.array(task.sequence[task.t2][0:3])
+            step_theta = task.sequence[task.t2][3]
+            
+            # Target sphere
+            if scn.ngeom < scn.maxgeom:
+                mujoco.mjv_initGeom(
+                    scn.geoms[scn.ngeom],
+                    mujoco.mjtGeom.mjGEOM_SPHERE,
+                    np.ones(3)*sphere_size,
+                    step_pos,
+                    np.eye(3).flatten(),
+                    np.array([0, 0, 1, 1])  # Blue
+                )
+                scn.ngeom += 1
+            
+            # Target arrow
+            if scn.ngeom < scn.maxgeom:
+                arrow_rot = tf3.euler.euler2mat(0, np.pi/2, step_theta)
+                mujoco.mjv_initGeom(
+                    scn.geoms[scn.ngeom],
+                    mujoco.mjtGeom.mjGEOM_ARROW,
+                    np.array([0.02, 0.02, arrow_size]),
+                    step_pos,
+                    arrow_rot.flatten(),
+                    np.array([0, 0, 1, 1])  # Blue
+                )
+                scn.ngeom += 1
+            
+            # Acceptance radius sphere (transparent)
+            if scn.ngeom < scn.maxgeom:
+                mujoco.mjv_initGeom(
+                    scn.geoms[scn.ngeom],
+                    mujoco.mjtGeom.mjGEOM_SPHERE,
+                    np.ones(3)*target_radius,
+                    step_pos,
+                    np.eye(3).flatten(),
+                    np.array([0, 0, 1, 0.1])  # Transparent blue
+                )
+                scn.ngeom += 1
+                
+        except Exception as e:
+            # If visualization fails, just skip it
+            pass
 
     @torch.no_grad()
     def run(self):
@@ -75,6 +215,10 @@ class EvaluateEnv:
                 ep_rewards.append(info)
             step_count += 1
 
+            # Draw footstep markers if this is a stepping task
+            if hasattr(self.env, 'task'):
+                self._draw_footstep_markers(viewer, self.env.task, self.env.data)
+            
             # render scene
             cam.lookat = self.env.data.body(1).xpos.copy()
             if self.record_video:

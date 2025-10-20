@@ -169,33 +169,37 @@ class RobotInterface(object):
 
     def get_act_joint_positions(self):
         """
-        Returns position of actuators at joint level.
+        Returns joint positions (qpos) of all actuated joints, ordered by actuator order.
         """
-        gear_ratios = self.model.actuator_gear[:,0]
-        motor_positions = self.get_motor_positions()
-        return (motor_positions/gear_ratios)
+        actuator_names = self.get_motor_names()
+        joint_names = [n[:-6] if n.endswith('_motor') else n for n in actuator_names]
+        qpos_addrs = [int(self.model.joint(jn).qposadr[0]) for jn in joint_names]
+        positions = [float(self.data.qpos[addr]) for addr in qpos_addrs]
+        return np.asarray(positions)
 
     def get_act_joint_velocities(self):
         """
-        Returns velocities of actuators at joint level.
+        Returns joint velocities (qvel) of all actuated joints, ordered by actuator order.
         """
-        gear_ratios = self.model.actuator_gear[:,0]
-        motor_velocities = self.get_motor_velocities()
-        return (motor_velocities/gear_ratios)
+        actuator_names = self.get_motor_names()
+        joint_names = [n[:-6] if n.endswith('_motor') else n for n in actuator_names]
+        qvel_addrs = [int(self.model.joint(jn).dofadr[0]) for jn in joint_names]
+        velocities = [float(self.data.qvel[addr]) for addr in qvel_addrs]
+        return np.asarray(velocities)
 
     def get_act_joint_position(self, act_name):
         """
-        Returns position of actuator at joint level.
+        Returns joint position (qpos) for the given joint name.
         """
-        assert len(self.data.actuator(act_name).length)==1
-        return self.data.actuator(act_name).length[0]/self.model.actuator(act_name).gear[0]
+        qpos_addr = int(self.get_jnt_qposadr_by_name(act_name)[0])
+        return float(self.data.qpos[qpos_addr])
 
     def get_act_joint_velocity(self, act_name):
         """
-        Returns velocity of actuator at joint level.
+        Returns joint velocity (qvel) for the given joint name.
         """
-        assert len(self.data.actuator(act_name).velocity)==1
-        return self.data.actuator(act_name).velocity[0]/self.model.actuator(act_name).gear[0]
+        qvel_addr = int(self.get_jnt_qveladr_by_name(act_name)[0])
+        return float(self.data.qvel[qvel_addr])
 
     def get_act_joint_ranges(self):
         """

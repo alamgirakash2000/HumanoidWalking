@@ -10,14 +10,15 @@ from envs.common import robot_interface
 from envs.common import config_builder
 from .g1_walk_env import G1WalkEnv
 
-from .gen_xml import *
+from .gen_xml import builder, LEG_JOINTS
 
 class G1StepEnv(G1WalkEnv):
     def __init__(self, path_to_yaml=None):
 
-        ## Load CONFIG from yaml ##
+        # Load CONFIG from yaml
         if path_to_yaml is None:
-            path_to_yaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'configs/base.yaml')
+            path_to_yaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                                        'configs/base.yaml')
 
         self.cfg = config_builder.load_yaml(path_to_yaml)
 
@@ -41,16 +42,17 @@ class G1StepEnv(G1WalkEnv):
         pdgains[1] = self.cfg.kd
 
         # list of desired actuators
-        # left_hip_yaw, left_hip_roll, left_hip_pitch, left_knee, left_ankle_pitch, left_ankle_roll
-        # right_hip_yaw, right_hip_roll, right_hip_pitch, right_knee, right_ankle_pitch, right_ankle_roll
+        # left_hip_yaw, left_hip_roll, left_hip_pitch,
+        # left_knee, left_ankle_pitch, left_ankle_roll
+        # right_hip_yaw, right_hip_roll, right_hip_pitch,
+        # right_knee, right_ankle_pitch, right_ankle_roll
         self.actuators = LEG_JOINTS
 
         # define nominal pose
         base_position = [0, 0, 0.80]
         base_orientation = [1, 0, 0, 0]
         half_sitting_pose = [0.0, 0.0, -0.2, 0.6, -0.2, 0.0,
-                             0.0, 0.0, -0.2, 0.6, -0.2, 0.0,
-        ] # radians
+                             0.0, 0.0, -0.2, 0.6, -0.2, 0.0]
         self.nominal_pose = base_position + base_orientation + half_sitting_pose
 
         # set up interface
@@ -63,7 +65,7 @@ class G1StepEnv(G1WalkEnv):
                                                root_body='pelvis',
                                                lfoot_body='left_ankle_roll_link',
                                                rfoot_body='right_ankle_roll_link',
-                                               head_body='pelvis',
+                                               head_body='torso_link',
         )
         # set goal height
         self.task._goal_height_ref = 0.80

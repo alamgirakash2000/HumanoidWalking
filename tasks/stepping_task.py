@@ -82,16 +82,25 @@ class SteppingTask(object):
             l_vel = (lambda _:-1)
         head_pos = self._client.get_object_xpos_by_name(self._head_body_name, 'OBJ_BODY')[0:2]
         root_pos = self._client.get_object_xpos_by_name(self._root_body_name, 'OBJ_BODY')[0:2]
-        reward = dict(foot_frc_score=0.150 * rewards._calc_foot_frc_clock_reward(self, l_frc, r_frc),
-                      foot_vel_score=0.150 * rewards._calc_foot_vel_clock_reward(self, l_vel, r_vel),
-                      orient_cost=0.050 * rewards._calc_body_orient_reward(self,
-                                                                           self._root_body_name,
-                                                                           quat_ref=orient),
-                      height_error=0.050 * rewards._calc_height_reward(self),
-                      #torque_penalty=0.050 * rewards._calc_torque_reward(self, prev_torque),
-                      #action_penalty=0.050 * rewards._calc_action_reward(self, prev_action),
-                      step_reward=0.450 * self.step_reward(),
-                      upper_body_reward=0.050 * np.exp(-10*np.square(np.linalg.norm(head_pos-root_pos)))
+        # Defer foot clearance shaping until later iterations (post-3k)
+        clearance_coeff = 0.0
+        if getattr(self, 'iteration_count', 0) >= 3000:
+            clearance_coeff = 0.150
+
+        reward = dict(
+            foot_frc_score=0.150 * rewards._calc_foot_frc_clock_reward(self, l_frc, r_frc),
+            foot_vel_score=0.150 * rewards._calc_foot_vel_clock_reward(self, l_vel, r_vel),
+            foot_clearance=clearance_coeff * rewards._calc_foot_pos_clock_reward(self),
+            orient_cost=0.050 * rewards._calc_body_orient_reward(
+                self, self._root_body_name, quat_ref=orient
+            ),
+            height_error=0.050 * rewards._calc_height_reward(self),
+            torque_penalty=0.025 * rewards._calc_torque_reward(self, prev_torque),
+            action_penalty=0.025 * rewards._calc_action_reward(self, action, prev_action),
+            step_reward=0.350 * self.step_reward(),
+            upper_body_reward=0.050 * np.exp(
+                -10 * np.square(np.linalg.norm(head_pos - root_pos))
+            ),
         )
         return reward
 
@@ -245,7 +254,11 @@ class SteppingTask(object):
         self._goal_steps_z = [0, 0]
         self._goal_steps_theta = [0, 0]
 
-        self.target_radius = 0.20
+        # Curriculum: tighten footstep acceptance radius over training
+        _radius_progress = np.clip(self.iteration_count / 12000.0, 0, 1)
+        self.target_radius = float(
+            np.clip(0.18 - 0.10 * _radius_progress, 0.08, None)
+        )
         self.delay_frames = int(np.floor(self._swing_duration/self._control_dt))
         self.target_reached = False
         self.target_reached_frames = 0
@@ -265,30 +278,39 @@ class SteppingTask(object):
         self._phase = int(np.random.choice([0, self._period/2]))
 
         ## GENERATE STEP SEQUENCE
-        # select a walking 'mode'
-        self.mode = np.random.choice(
-            [WalkModes.CURVED, WalkModes.STANDING, WalkModes.BACKWARD, WalkModes.LATERAL, WalkModes.FORWARD],
-            p=[0.15, 0.05, 0.0, 0.0, 0.8])
-
-        d = {'step_size':0.3, 'step_gap':0.15, 'step_height':0, 'num_steps':20, 'curved':False, 'lateral':False}
-        # generate sequence according to mode
-        if self.mode == WalkModes.CURVED:
-            d['curved'] = True
-        elif self.mode == WalkModes.STANDING:
-            d['num_steps'] = 1
-        elif self.mode == WalkModes.BACKWARD:
-            d['step_size'] = -0.1
-        elif self.mode == WalkModes.INPLACE:
-            ss = np.random.uniform(-0.05, 0.05)
-            d['step_size']=ss
-        elif self.mode == WalkModes.LATERAL:
-            d['step_size'] = 0.4
-            d['lateral'] = True
-        elif self.mode == WalkModes.FORWARD:
-            h = np.clip((self.iteration_count-3000)/8000, 0, 1)*0.1
-            d['step_height']=np.random.choice([-h, h])
+        # Curriculum: start with standing, then flat forward, then introduce stairs
+        if self.iteration_count < 1500:
+            self.mode = WalkModes.STANDING
+            d = {
+                'step_size': 0.0,
+                'step_gap': 0.15,
+                'step_height': 0.0,
+                'num_steps': 1,
+                'curved': False,
+                'lateral': False,
+            }
+        elif self.iteration_count < 3000:
+            self.mode = WalkModes.FORWARD
+            d = {'step_size':0.20, 'step_gap':0.12, 'step_height':0.0, 'num_steps':14, 'curved':False, 'lateral':False}
+        elif self.iteration_count < 6000:
+            self.mode = WalkModes.FORWARD
+            h = np.random.uniform(0.02, 0.05)
+            d = {'step_size':0.25, 'step_gap':0.12, 'step_height':np.random.choice([-h, h]), 'num_steps':16, 'curved':False, 'lateral':False}
         else:
-            raise Exception("Invalid WalkModes")
+            # After 6000 iters, include curved and lateral occasionally, and larger step heights
+            self.mode = np.random.choice(
+                [WalkModes.CURVED, WalkModes.LATERAL, WalkModes.FORWARD],
+                p=[0.1, 0.1, 0.8]
+            )
+            d = {'step_size':0.3, 'step_gap':0.15, 'step_height':0.0, 'num_steps':20, 'curved':False, 'lateral':False}
+            if self.mode == WalkModes.CURVED:
+                d['curved'] = True
+            elif self.mode == WalkModes.LATERAL:
+                d['step_size'] = 0.4
+                d['lateral'] = True
+            else:
+                h = np.clip((self.iteration_count - 6000) / 6000, 0, 1) * 0.14
+                d['step_height'] = np.random.choice([-h, h])
         sequence = self.generate_step_sequence(**d)
         self.sequence = self.transform_sequence(sequence)
         self.update_target_steps()

@@ -81,6 +81,52 @@ def builder(export_path, config):
     tree = ET.parse(g1_xml_path)
     root = tree.getroot()
 
+    # Add/update solver settings for better contact handling
+    option = root.find('option')
+    if option is None:
+        option = ET.SubElement(root, 'option')
+    option.set('integrator', 'implicitfast')
+    option.set('timestep', '0.001')
+    option.set('iterations', '100')  # Increased from 50 for better convergence
+    option.set('solver', 'Newton')
+    option.set('tolerance', '1e-10')
+    option.set('cone', 'pyramidal')  # Better friction model
+    option.set('jacobian', 'auto')  # Let MuJoCo choose best Jacobian
+    
+    # Add contact solver parameters to default
+    default_elem = root.find('default')
+    if default_elem is None:
+        default_elem = ET.SubElement(root, 'default')
+    
+    # Find or create g1 default class
+    g1_default = default_elem.find(".//default[@class='g1']")
+    if g1_default is None:
+        g1_default = ET.SubElement(default_elem, 'default', {'class': 'g1'})
+    
+    # Add geom defaults with contact parameters
+    geom_default = g1_default.find('geom')
+    if geom_default is None:
+        geom_default = ET.SubElement(g1_default, 'geom')
+    geom_default.set('solref', '0.01 1')  # Soft contacts with good damping
+    geom_default.set('solimp', '0.99 0.99 0.001')  # High impedance, low penetration
+    geom_default.set('friction', '1.0 0.005 0.0001')  # Good friction for stairs
+    
+    # Update foot collision sphere parameters specifically
+    collision_default = g1_default.find(".//default[@class='collision']")
+    if collision_default is not None:
+        foot_default = collision_default.find(".//default[@class='foot']")
+        if foot_default is not None:
+            foot_geom = foot_default.find('geom')
+            if foot_geom is None:
+                foot_geom = ET.SubElement(foot_default, 'geom')
+            foot_geom.set('type', 'sphere')
+            foot_geom.set('size', '0.012')  # Slightly larger: 12mm instead of 5mm
+            foot_geom.set('solref', '0.001 1')  # Very stiff for feet
+            foot_geom.set('solimp', '0.995 0.999 0.0001')  # Extremely high impedance
+            foot_geom.set('friction', '1.5 0.005 0.0001')  # Very high friction
+            foot_geom.set('condim', '3')
+            foot_geom.set('priority', '1')
+    
     # Rename freejoint to 'root'
     pelvis = root.find(".//body[@name='pelvis']")
     if pelvis is not None:
@@ -88,19 +134,44 @@ def builder(export_path, config):
         if fj is not None:
             fj.set('name', 'root')
 
-    # Add ankle sites
+    # Add ankle sites and additional foot collision geometry
     for body_name, site_name in [
         ('left_ankle_roll_link', 'lf_force'),
         ('right_ankle_roll_link', 'rf_force')
     ]:
         b = root.find(f".//body[@name='{body_name}']")
-        if b is not None and b.find(f"site[@name='{site_name}']") is None:
-            site = ET.SubElement(b, 'site')
-            site.set('name', site_name)
-            site.set('pos', '0.03 0 -0.03')
-            site.set('size', '0.001')
-            site.set('rgba', '0.5 0.5 0.5 0.3')
-            site.set('group', '4')
+        if b is not None:
+            # Add force site if not present
+            if b.find(f"site[@name='{site_name}']") is None:
+                site = ET.SubElement(b, 'site')
+                site.set('name', site_name)
+                site.set('pos', '0.03 0 -0.03')
+                site.set('size', '0.001')
+                site.set('rgba', '0.5 0.5 0.5 0.3')
+                site.set('group', '4')
+            
+            # Add more collision spheres to prevent toe penetration
+            # Original has 4 spheres - add 6 more for better coverage
+            additional_contact_points = [
+                # Mid-foot area
+                ('0.0 0.02 -0.03', '0.015'),   # mid left
+                ('0.0 -0.02 -0.03', '0.015'),  # mid right
+                ('0.035 0.02 -0.03', '0.015'), # mid-front left
+                ('0.035 -0.02 -0.03', '0.015'),# mid-front right
+                # Extra toe coverage (most important!)
+                ('0.08 0 -0.03', '0.015'),     # center toe
+                ('0.105 0 -0.03', '0.015'),    # forward toe
+            ]
+            
+            for pos, size in additional_contact_points:
+                # Check if geom already exists at this position
+                existing = [g for g in b.findall('geom') 
+                           if g.get('pos') == pos]
+                if not existing:
+                    geom = ET.SubElement(b, 'geom')
+                    geom.set('class', 'foot')
+                    geom.set('pos', pos)
+                    geom.set('size', size)
 
     # Replace actuators with torque motors per LEG_JOINTS
     root = _add_leg_motors_et(root)
@@ -123,7 +194,11 @@ def builder(export_path, config):
         'name': 'floor',
         'type': 'plane',
         'size': '0 0 0.25',
-        'material': 'groundplane'
+        'material': 'groundplane',
+        'solref': '0.002 1',  # Very stiff contact (was 0.01 1)
+        'solimp': '0.99 0.995 0.001',  # High impedance, minimal penetration
+        'friction': '1.2 0.005 0.0001',  # High friction for grip
+        'condim': '3'  # 3D friction cone
     })
 
     # Remove keyframes or adjust to match actuator count (avoid ctrl size mismatch)
@@ -152,7 +227,11 @@ def builder(export_path, config):
                 'type': 'box',
                 'size': '0.15 0.1 0.1',
                 'rgba': '0.8 0.8 0.8 1',
-                'group': '0'
+                'group': '0',
+                'solref': '0.002 1',  # Very stiff contact
+                'solimp': '0.99 0.995 0.001',  # High impedance
+                'friction': '1.2 0.005 0.0001',  # High friction
+                'condim': '3'  # 3D friction cone
             })
 
     # Ensure groundplane texture/material assets exist

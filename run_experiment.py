@@ -82,7 +82,7 @@ if __name__ == "__main__":
         parser.add_argument("--logdir", default=Path("/tmp/logs"), type=Path, help="Path to save weights and logs")
         parser.add_argument("--input-norm-steps", type=int, default=100000)
         parser.add_argument("--n-itr", type=int, default=20000, help="Number of iterations of the learning algorithm")
-        parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate") # Xie
+        parser.add_argument("--lr", type=float, default=1e-4, help="Adam learning rate") 
         parser.add_argument("--eps", type=float, default=1e-5, help="Adam epsilon (for numerical stability)")
         parser.add_argument("--lam", type=float, default=0.95, help="Generalized advantage estimate discount")
         parser.add_argument("--gamma", type=float, default=0.99, help="MDP discount")
